@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172133">
+  <meta name="description" content="Quel service de la mairie de Séné sommeille en toi ? Un quiz interne en dix questions.">
+  <title>Quel service sommeille en toi ? — Mairie de Séné</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script defer src="js/services.js"></script>
+  <script defer src="js/questions.js"></script>
+  <script defer src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar"><a class="wordmark" href="#accueil" aria-label="Quiz municipal de Séné, accueil">SÉNÉ <b>QUIZ</b></a></header>
+  <main class="app-shell">
+    <section id="screen-home" class="screen screen--active home" aria-labelledby="home-title">
+      <div class="home__copy">
+        <p class="kicker">Le grand quiz des services</p>
+        <h1 id="home-title">ET TOI,<br>QUEL <span>SERVICE</span><br>SOMMEILLE EN TOI&nbsp;?</h1>
+        <p class="home__lead">Dix choix au feeling pour découvrir où ton talent ferait sensation à la mairie de Séné.</p>
+        <button id="start-button" class="button button--primary">JOUER <span aria-hidden="true">→</span></button>
+        <p class="home__meta">10 questions <span>•</span> 18 services <span>•</span> 3 minutes</p>
+      </div>
+      <div class="show-board" aria-hidden="true"><div class="show-board__inner"><span class="show-board__question">?</span><span class="show-board__caption">LA RÉPONSE<br>EST EN TOI</span></div></div>
+      <p class="home__disclaimer">Quiz 100 % scientifique, à environ 100 % près. Jeu interne sans valeur RH ou administrative.</p>
+    </section>
+
+    <section id="screen-quiz" class="screen quiz" aria-labelledby="question-title" hidden>
+      <div class="quiz__top"><button class="text-button" id="quit-button">← Quitter</button><span id="question-count">01 / 10</span></div>
+      <div class="progress-track" role="progressbar" aria-label="Progression du quiz" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><span id="progress-fill"></span></div>
+      <div class="quiz__content" aria-live="polite"><p class="kicker">À TOI DE CHOISIR</p><h2 id="question-title" tabindex="-1"></h2><div id="answers" class="answers"></div></div>
+      <p id="between-message" class="quiz__message" aria-live="polite"></p>
+    </section>
+
+    <section id="screen-loading" class="screen loading" aria-live="polite" hidden><div class="loading__disc" aria-hidden="true">?</div><h2 id="loading-message">Analyse de ton profil…</h2><div class="loading__bar"><span></span></div></section>
+
+    <section id="screen-result" class="screen result" aria-labelledby="result-name" hidden>
+      <div class="result__intro"><p class="kicker">LE VERDICT EST TOMBÉ</p><h2>Ton service, c’est…</h2></div>
+      <article id="certificate" class="certificate">
+        <div class="certificate__header"><span class="certificate__badge" aria-hidden="true">S</span><span>MAIRIE DE SÉNÉ<br><small>CERTIFICAT OFFICIEUX</small></span><span id="certificate-number" class="certificate__number"></span></div>
+        <div class="certificate__body"><p class="certificate__label">L’HEUREUX SERVICE EST</p><h3 id="result-name"></h3><p id="result-description" class="certificate__description"></p><blockquote id="result-catchphrase"></blockquote><p id="result-certificate-text" class="certificate__commendation"></p><div id="strengths" class="strengths"></div></div>
+        <div class="certificate__footer"><span>Décerné le <strong id="certificate-date"></strong></span><span class="certificate__signature">Le comité du quiz</span><span class="stamp" aria-label="Tampon validé">VALIDÉ</span></div>
+      </article>
+      <div class="result__actions"><button class="button button--primary" id="restart-button">REJOUER <span aria-hidden="true">↻</span></button><button class="button button--outline" id="print-button">IMPRIMER LE CERTIFICAT</button><button class="text-button" id="affinity-button" aria-expanded="false">Voir mes autres affinités ↓</button></div>
+      <div class="affinities" id="affinities" hidden aria-live="polite"></div>
+      <p class="result__fine">Un jeu interne sans valeur RH ou administrative. Aucune donnée n’est conservée.</p>
+      <div id="confetti" class="confetti" aria-hidden="true"></div>
+    </section>
+  </main>
+</body>
+</html>
