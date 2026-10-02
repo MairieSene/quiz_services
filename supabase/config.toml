@@ -1,0 +1,14 @@
+[functions.create-session]
+verify_jwt = false
+
+[functions.join-session]
+verify_jwt = false
+
+[functions.submit-result]
+verify_jwt = false
+
+[functions.admin-results]
+verify_jwt = false
+
+[functions.close-session]
+verify_jwt = false

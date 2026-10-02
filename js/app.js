@@ -10,8 +10,11 @@
   };
   const LOADING_MESSAGES = ['On recoupe tes réponses…', 'La commission retient son souffle…', 'Verdict prêt !'];
   const $ = selector => document.querySelector(selector);
-  const screens = { home: $('#screen-home'), quiz: $('#screen-quiz'), loading: $('#screen-loading'), result: $('#screen-result') };
-  const state = { questions: [], index: 0, scores: emptyScores(), locked: false, result: null, affinities: [], titleClicks: 0 };
+  const screens = {
+    home: $('#screen-home'), created: $('#screen-session-created'), admin: $('#screen-admin'),
+    quiz: $('#screen-quiz'), loading: $('#screen-loading'), result: $('#screen-result')
+  };
+  const state = { questions: [], index: 0, scores: emptyScores(), locked: false, result: null, affinities: [], titleClicks: 0, session: null, admin: null, pollTimer: null };
 
   function emptyScores() { return Object.fromEntries(TRAITS.map(trait => [trait, 0])); }
   function shuffle(items, random = Math.random) {
@@ -88,11 +91,28 @@
     return ranked.at(-1).service;
   }
   function setScreen(name) {
+    if (name !== 'admin') stopAdminPolling();
     for (const [key, screen] of Object.entries(screens)) {
       screen.hidden = key !== name;
       screen.classList.toggle('screen--active', key === name);
     }
+    document.body.classList.toggle('projection-view', name === 'created');
+    document.body.classList.toggle('admin-view', name === 'admin');
     window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+  function renderSessionQr(canvasSelector, messageSelector, code, width) {
+    const canvas = $(canvasSelector);
+    const message = $(messageSelector);
+    canvas.hidden = true;
+    message.textContent = '';
+    if (!window.QRCode || !window.QRCode.toCanvas) {
+      message.textContent = 'QR code indisponible. Le numéro reste utilisable.';
+      return;
+    }
+    window.QRCode.toCanvas(canvas, window.QuizSessions.joinUrl(code), { width, margin: 2 }, error => {
+      canvas.hidden = Boolean(error);
+      message.textContent = error ? 'Le QR code ne peut pas être généré. Le numéro reste utilisable.' : '';
+    });
   }
   function renderQuestion() {
     const question = state.questions[state.index];
@@ -129,6 +149,9 @@
     $('#affinities').hidden = true;
     $('#affinity-button').setAttribute('aria-expanded', 'false');
     $('#affinity-button').textContent = 'Voir mes autres affinités ↓';
+    $('#restart-button').hidden = Boolean(state.session);
+    $('#session-submit-status').hidden = true;
+    $('#retry-submit-button').hidden = true;
     setScreen('quiz');
     renderQuestion();
   }
@@ -157,6 +180,7 @@
     renderResult();
     setScreen('result');
     makeConfetti();
+    if (state.session) submitSessionResult();
   }
   function certificateId() {
     const year = new Date().getFullYear();
@@ -179,6 +203,149 @@
       return chip;
     }));
     renderAffinities();
+  }
+
+  async function submitSessionResult() {
+    const status = $('#session-submit-status');
+    const retry = $('#retry-submit-button');
+    status.hidden = false;
+    status.textContent = 'Envoi du résultat à la session…';
+    retry.hidden = true;
+    try {
+      await window.QuizSessions.submit(state.session.sessionId, state.session.participantToken, state.result.id);
+      status.textContent = 'Résultat transmis à l’organisateur.';
+    } catch (error) {
+      status.textContent = error.message;
+      retry.hidden = false;
+    }
+  }
+
+  function showMessage(selector, message) {
+    $(selector).textContent = message || '';
+  }
+
+  function stopAdminPolling() {
+    if (state.pollTimer) window.clearInterval(state.pollTimer);
+    state.pollTimer = null;
+  }
+
+  function renderAdminResults(payload) {
+    const region = $('#admin-results');
+    const total = Number(payload.total) || 0;
+    $('#admin-participant-count').textContent = String(total);
+    const resultMap = new Map((payload.results || []).map(item => [item.serviceId, Number(item.count) || 0]));
+    region.replaceChildren(...window.QUIZ_SERVICES.map(service => {
+      const count = resultMap.get(service.id) || 0;
+      const card = document.createElement('article');
+      const top = document.createElement('div');
+      const name = document.createElement('span');
+      const value = document.createElement('strong');
+      const bar = document.createElement('div');
+      const fill = document.createElement('span');
+      card.className = 'admin-result';
+      top.className = 'admin-result__top';
+      name.textContent = service.shortName;
+      value.textContent = String(count);
+      bar.className = 'admin-result__bar';
+      fill.style.width = `${total ? Math.round(count / total * 100) : 0}%`;
+      bar.append(fill);
+      top.append(name, value);
+      card.append(top, bar);
+      return card;
+    }));
+    if (payload.status === 'closed') {
+      $('#admin-status').textContent = 'Cette session est terminée. Le récapitulatif reste disponible pendant 30 jours.';
+      $('#close-session-button').hidden = true;
+    } else {
+      $('#admin-status').textContent = 'Actualisation automatique toutes les 3 secondes.';
+    }
+  }
+
+  async function refreshAdminResults() {
+    if (!state.admin) return;
+    try {
+      const payload = await window.QuizSessions.results(state.admin.code, state.admin.secret);
+      renderAdminResults(payload);
+      if (payload.status === 'closed') stopAdminPolling();
+    } catch (error) {
+      $('#admin-status').textContent = error.message;
+    }
+  }
+
+  function openAdmin(admin) {
+    state.admin = admin;
+    $('#admin-session-code').textContent = admin.code;
+    renderSessionQr('#admin-session-qr', '#admin-qr-message', admin.code, 360);
+    $('#close-session-button').hidden = false;
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.searchParams.set('admin', admin.code);
+    window.history.replaceState({}, '', url);
+    setScreen('admin');
+    refreshAdminResults();
+    state.pollTimer = window.setInterval(refreshAdminResults, 3000);
+  }
+
+  async function createSession() {
+    showMessage('#home-message', 'Création de la session…');
+    $('#create-session-button').disabled = true;
+    try {
+      const created = await window.QuizSessions.create();
+      state.admin = { code: created.code, secret: created.adminSecret };
+      sessionStorage.setItem(`quiz-admin:${created.code}`, created.adminSecret);
+      const createdUrl = new URL(window.location.href);
+      createdUrl.search = '';
+      createdUrl.searchParams.set('admin', created.code);
+      window.history.replaceState({}, '', createdUrl);
+      $('#created-session-code').textContent = created.code;
+      $('#created-admin-secret').textContent = created.adminSecret;
+      $('#created-admin-secret').closest('details').open = false;
+      renderSessionQr('#session-qr-canvas', '#session-qr-message', created.code, 480);
+      showMessage('#home-message', '');
+      setScreen('created');
+    } catch (error) {
+      showMessage('#home-message', error.message);
+    } finally {
+      $('#create-session-button').disabled = false;
+    }
+  }
+
+  async function joinSession(event) {
+    event.preventDefault();
+    const code = $('#join-code').value.trim();
+    const submitButton = $('#join-form button[type="submit"]');
+    showMessage('#join-message', 'Vérification du numéro…');
+    submitButton.disabled = true;
+    try {
+      const joined = await window.QuizSessions.join(code);
+      state.session = { code, sessionId: joined.sessionId, participantToken: joined.participantToken };
+      showMessage('#join-message', 'Session rejointe. Le quiz commence !');
+      startGame();
+    } catch (error) {
+      showMessage('#join-message', error.message);
+    } finally {
+      submitButton.disabled = false;
+    }
+  }
+
+  async function loginAdmin(event) {
+    event.preventDefault();
+    const code = $('#admin-login-code').value.trim();
+    const secret = $('#admin-login-secret').value.trim();
+    const submitButton = $('#admin-login-form button[type="submit"]');
+    showMessage('#admin-login-message', 'Vérification de la clé admin…');
+    submitButton.disabled = true;
+    try {
+      await window.QuizSessions.results(code, secret);
+      sessionStorage.setItem(`quiz-admin:${code}`, secret);
+      $('#admin-login-secret').value = '';
+      showMessage('#admin-login-message', '');
+      openAdmin({ code, secret });
+    } catch (error) {
+      showMessage('#admin-login-message', error.message);
+    } finally {
+      submitButton.disabled = false;
+    }
   }
   function renderAffinities() {
     const region = $('#affinities');
@@ -237,12 +404,52 @@
     for (const service of window.QUIZ_SERVICES) for (const trait of Object.keys(service.profile)) if (!TRAITS.includes(trait)) throw new Error(`Trait inconnu dans ${service.name} : ${trait}`);
   }
   function bindEvents() {
-    $('#start-button').addEventListener('click', startGame);
+    $('#start-button').addEventListener('click', () => { state.session = null; startGame(); });
     $('#restart-button').addEventListener('click', startGame);
-    $('#quit-button').addEventListener('click', () => setScreen('home'));
-    $('.wordmark').addEventListener('click', event => { event.preventDefault(); setScreen('home'); });
+    $('#quit-button').addEventListener('click', () => { state.session = null; setScreen('home'); });
+    $('.wordmark').addEventListener('click', event => { event.preventDefault(); state.session = null; setScreen('home'); });
     $('#print-button').addEventListener('click', () => window.print());
     $('#affinity-button').addEventListener('click', toggleAffinities);
+    $('#create-session-button').addEventListener('click', createSession);
+    $('#show-join-button').addEventListener('click', () => {
+      $('#join-form').hidden = !$('#join-form').hidden;
+      if (!$('#join-form').hidden) $('#join-code').focus();
+    });
+    $('#join-form').addEventListener('submit', joinSession);
+    $('#show-admin-login-button').addEventListener('click', () => {
+      $('#admin-login-form').hidden = !$('#admin-login-form').hidden;
+      if (!$('#admin-login-form').hidden) $('#admin-login-code').focus();
+    });
+    $('#admin-login-form').addEventListener('submit', loginAdmin);
+    $('#open-admin-button').addEventListener('click', () => openAdmin(state.admin));
+    $('#close-session-button').addEventListener('click', async () => {
+      if (!state.admin) return;
+      $('#close-session-button').disabled = true;
+      try {
+        await window.QuizSessions.close(state.admin.code, state.admin.secret);
+        await refreshAdminResults();
+      } catch (error) {
+        $('#admin-status').textContent = error.message;
+      } finally {
+        $('#close-session-button').disabled = false;
+      }
+    });
+    $('#retry-submit-button').addEventListener('click', submitSessionResult);
+    $('#copy-admin-secret').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText($('#created-admin-secret').textContent);
+        $('#copy-admin-secret').textContent = 'CLÉ COPIÉE';
+      } catch {
+        $('#session-qr-message').textContent = 'Copie automatique impossible. Sélectionne la clé et copie-la manuellement.';
+      }
+    });
+    document.querySelectorAll('[data-go-home]').forEach(button => button.addEventListener('click', () => {
+      const url = new URL(window.location.href);
+      url.search = '';
+      window.history.replaceState({}, '', url);
+      state.admin = null;
+      setScreen('home');
+    }));
     $('#home-title').addEventListener('click', () => {
       if (++state.titleClicks === 5) $('.home__meta').textContent = 'Le comité a repéré ton sens de l’observation 👀';
     });
@@ -251,4 +458,28 @@
   window.debugQuiz = Object.freeze({ simulate, selectQuestions: () => selectQuestions(), calculateResult: scores => rankServices(scores), questionCount: window.QUIZ_QUESTIONS.length, serviceCount: window.QUIZ_SERVICES.length });
   validateData();
   bindEvents();
+  if (window.QuizSessions.configured) {
+    const params = new URLSearchParams(window.location.search);
+    const joinCode = params.get('session');
+    const adminCode = params.get('admin');
+    if (joinCode && /^\d{6}$/.test(joinCode)) {
+      $('#join-form').hidden = false;
+      $('#join-code').value = joinCode;
+      $('#join-message').textContent = 'Numéro de session prêt à être rejoint.';
+      $('#join-code').focus();
+    }
+    if (adminCode && /^\d{6}$/.test(adminCode)) {
+      const secret = sessionStorage.getItem(`quiz-admin:${adminCode}`);
+      if (secret) openAdmin({ code: adminCode, secret });
+      else {
+        $('#admin-login-form').hidden = false;
+        $('#admin-login-code').value = adminCode;
+      }
+    }
+  } else {
+    $('#home-message').textContent = 'Les sessions partagées seront disponibles après configuration de Supabase. Le mode solo reste utilisable.';
+    $('#create-session-button').disabled = true;
+    $('#show-join-button').disabled = true;
+    $('#show-admin-login-button').disabled = true;
+  }
 })();

@@ -7,8 +7,11 @@
   <meta name="description" content="Quel service de la mairie de Séné sommeille en toi ? Un quiz interne en dix questions.">
   <title>Quel service sommeille en toi ? — Mairie de Séné</title>
   <link rel="stylesheet" href="css/style.css">
+  <script defer src="js/vendor/qrcode.min.js"></script>
   <script defer src="js/services.js"></script>
   <script defer src="js/questions.js"></script>
+  <script defer src="js/supabase-config.js"></script>
+  <script defer src="js/sessions.js"></script>
   <script defer src="js/app.js"></script>
 </head>
 <body>
@@ -19,11 +22,66 @@
         <p class="kicker">Le grand quiz des services</p>
         <h1 id="home-title">ET TOI,<br>QUEL <span>SERVICE</span><br>SOMMEILLE EN TOI&nbsp;?</h1>
         <p class="home__lead">Dix choix au feeling pour découvrir où ton talent ferait sensation à la mairie de Séné.</p>
-        <button id="start-button" class="button button--primary">JOUER <span aria-hidden="true">→</span></button>
+        <div class="home__actions">
+          <button id="create-session-button" class="button button--primary">CRÉER UNE SESSION <span aria-hidden="true">→</span></button>
+          <button id="show-join-button" class="button button--outline">REJOINDRE UNE SESSION</button>
+          <button id="start-button" class="text-button home__solo">Jouer seul sur cet appareil</button>
+        </div>
+        <form id="join-form" class="join-form" hidden>
+          <label for="join-code">Numéro de session</label>
+          <div class="join-form__row"><input id="join-code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="123456" required><button class="button button--primary" type="submit">REJOINDRE</button></div>
+          <p id="join-message" class="form-message" aria-live="polite"></p>
+        </form>
+        <button id="show-admin-login-button" class="text-button home__admin-link" type="button">Accès organisateur</button>
+        <form id="admin-login-form" class="join-form" hidden>
+          <label for="admin-login-code">Ouvrir un tableau admin</label>
+          <input id="admin-login-code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="Numéro de session" required>
+          <input id="admin-login-secret" type="password" autocomplete="current-password" placeholder="Clé admin" required>
+          <button class="button button--primary" type="submit">ACCÉDER AU TABLEAU</button>
+          <p id="admin-login-message" class="form-message" aria-live="polite"></p>
+        </form>
+        <p id="home-message" class="form-message" aria-live="polite"></p>
         <p class="home__meta">10 questions <span>•</span> 18 services <span>•</span> 3 minutes</p>
       </div>
       <div class="show-board" aria-hidden="true"><div class="show-board__inner"><span class="show-board__question">?</span><span class="show-board__caption">LA RÉPONSE<br>EST EN TOI</span></div></div>
-      <p class="home__disclaimer">Quiz 100 % scientifique, à environ 100 % près. Jeu interne sans valeur RH ou administrative.</p>
+      <p class="home__disclaimer">Quiz 100 % scientifique, à environ 100 % près. Jeu interne sans valeur RH ou administrative. En session, le résultat est comptabilisé sans nom; les données sont supprimées au plus tard 30 jours après la clôture.</p>
+    </section>
+
+    <section id="screen-session-created" class="screen session-screen" aria-labelledby="session-created-title" hidden>
+      <button class="text-button session-back" data-go-home>← Accueil</button>
+      <div class="session-card session-card--projection">
+        <div class="session-invite-copy">
+          <p class="kicker">SESSION CRÉÉE</p><h2 id="session-created-title">Invite le groupe</h2>
+          <p>Scannez le QR code ou saisissez ce numéro sur la page d’accueil.</p>
+          <div class="session-code" id="created-session-code"></div>
+          <p class="session-code-caption">NUMÉRO DE SESSION</p>
+        </div>
+        <div class="session-qr session-qr--large"><canvas id="session-qr-canvas" aria-label="QR code pour rejoindre la session"></canvas><p id="session-qr-message" class="form-message"></p></div>
+        <div class="session-created-actions">
+          <button id="open-admin-button" class="button button--primary" type="button">OUVRIR LE TABLEAU ADMIN</button>
+          <details class="admin-secret">
+            <summary>Afficher la clé admin</summary>
+            <div class="admin-secret__content"><code id="created-admin-secret"></code><button id="copy-admin-secret" class="button button--outline" type="button">COPIER LA CLÉ</button></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section id="screen-admin" class="screen session-screen" aria-labelledby="admin-title" hidden>
+      <div class="admin-header"><div><p class="kicker">TABLEAU ADMIN</p><h2 id="admin-title">Résultats en direct</h2></div><button class="button button--outline" id="close-session-button" type="button">TERMINER LA SESSION</button></div>
+      <div class="admin-dashboard">
+        <div class="admin-dashboard__results">
+          <p id="admin-status" class="form-message" aria-live="polite"></p>
+          <div class="admin-total"><strong id="admin-participant-count">0</strong><span>participant(s)</span></div>
+          <div id="admin-results" class="admin-results" aria-live="polite"></div>
+          <button class="text-button" data-go-home>← Retour à l’accueil</button>
+        </div>
+        <aside class="admin-session-card" aria-label="Informations pour rejoindre la session">
+          <p class="kicker">POUR REJOINDRE</p><p class="admin-session-card__label">Numéro de session</p>
+          <div class="session-code" id="admin-session-code"></div>
+          <div class="session-qr session-qr--admin"><canvas id="admin-session-qr" aria-label="QR code pour rejoindre la session"></canvas><p id="admin-qr-message" class="form-message"></p></div>
+        </aside>
+      </div>
     </section>
 
     <section id="screen-quiz" class="screen quiz" aria-labelledby="question-title" hidden>
@@ -44,7 +102,9 @@
       </article>
       <div class="result__actions"><button class="button button--primary" id="restart-button">REJOUER <span aria-hidden="true">↻</span></button><button class="button button--outline" id="print-button">IMPRIMER LE CERTIFICAT</button><button class="text-button" id="affinity-button" aria-expanded="false">Voir mes autres affinités ↓</button></div>
       <div class="affinities" id="affinities" hidden aria-live="polite"></div>
-      <p class="result__fine">Un jeu interne sans valeur RH ou administrative. Aucune donnée n’est conservée.</p>
+      <p id="session-submit-status" class="form-message" aria-live="polite" hidden></p>
+      <button id="retry-submit-button" class="button button--outline" type="button" hidden>RÉESSAYER L’ENVOI DU RÉSULTAT</button>
+      <p class="result__fine">Un jeu interne sans valeur RH ou administrative. Aucun nom ni réponse détaillée n’est conservé.</p>
       <div id="confetti" class="confetti" aria-hidden="true"></div>
     </section>
   </main>
