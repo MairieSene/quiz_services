@@ -2,6 +2,7 @@
   'use strict';
 
   const QUESTION_COUNT = 10;
+  const ADMIN_REFRESH_DELAY_MS = 10_000;
   const TRAITS = ['public', 'cadre', 'terrain', 'urgence', 'analyse', 'soutien', 'idee', 'vivant', 'animation'];
   const TRAIT_LABELS = {
     public: 'Sens du contact', cadre: 'Sens de l’organisation', terrain: 'Esprit pratique',
@@ -14,7 +15,7 @@
     home: $('#screen-home'), created: $('#screen-session-created'), admin: $('#screen-admin'),
     quiz: $('#screen-quiz'), loading: $('#screen-loading'), result: $('#screen-result')
   };
-  const state = { questions: [], index: 0, scores: emptyScores(), locked: false, result: null, affinities: [], titleClicks: 0, session: null, admin: null, pollTimer: null };
+  const state = { questions: [], index: 0, scores: emptyScores(), locked: false, result: null, affinities: [], titleClicks: 0, session: null, admin: null, pollTimer: null, adminRequestInFlight: false };
 
   function emptyScores() { return Object.fromEntries(TRAITS.map(trait => [trait, 0])); }
   function shuffle(items, random = Math.random) {
@@ -225,7 +226,7 @@
   }
 
   function stopAdminPolling() {
-    if (state.pollTimer) window.clearInterval(state.pollTimer);
+    if (state.pollTimer) window.clearTimeout(state.pollTimer);
     state.pollTimer = null;
   }
 
@@ -257,22 +258,43 @@
       $('#admin-status').textContent = 'Cette session est terminée. Le récapitulatif reste disponible pendant 30 jours.';
       $('#close-session-button').hidden = true;
     } else {
-      $('#admin-status').textContent = 'Actualisation automatique toutes les 3 secondes.';
+      $('#admin-status').textContent = 'Actualisation automatique toutes les 10 secondes.';
     }
   }
 
   async function refreshAdminResults() {
-    if (!state.admin) return;
+    if (!state.admin || state.adminRequestInFlight || document.visibilityState === 'hidden') return null;
+    state.adminRequestInFlight = true;
     try {
       const payload = await window.QuizSessions.results(state.admin.code, state.admin.secret);
       renderAdminResults(payload);
-      if (payload.status === 'closed') stopAdminPolling();
+      if (payload.status === 'closed') {
+        stopAdminPolling();
+        return 'closed';
+      }
+      return 'active';
     } catch (error) {
       $('#admin-status').textContent = error.message;
+      return 'active';
+    } finally {
+      state.adminRequestInFlight = false;
     }
   }
 
-  function openAdmin(admin) {
+  function scheduleAdminRefresh() {
+    stopAdminPolling();
+    if (!state.admin || document.visibilityState === 'hidden') return;
+    state.pollTimer = window.setTimeout(async () => {
+      state.pollTimer = null;
+      if (!state.admin) return;
+      if (document.visibilityState === 'hidden') return;
+      const status = await refreshAdminResults();
+      if (state.admin && status !== 'closed') scheduleAdminRefresh();
+    }, ADMIN_REFRESH_DELAY_MS);
+  }
+
+  function openAdmin(admin, initialPayload = null) {
+    stopAdminPolling();
     state.admin = admin;
     $('#admin-session-code').textContent = admin.code;
     renderSessionQr('#admin-session-qr', '#admin-qr-message', admin.code, 360);
@@ -282,8 +304,14 @@
     url.searchParams.set('admin', admin.code);
     window.history.replaceState({}, '', url);
     setScreen('admin');
-    refreshAdminResults();
-    state.pollTimer = window.setInterval(refreshAdminResults, 3000);
+    if (initialPayload) {
+      renderAdminResults(initialPayload);
+      if (initialPayload.status !== 'closed') scheduleAdminRefresh();
+    } else {
+      refreshAdminResults().then(status => {
+        if (state.admin && status !== 'closed') scheduleAdminRefresh();
+      });
+    }
   }
 
   async function createSession() {
@@ -336,11 +364,11 @@
     showMessage('#admin-login-message', 'Vérification de la clé admin…');
     submitButton.disabled = true;
     try {
-      await window.QuizSessions.results(code, secret);
+      const initialPayload = await window.QuizSessions.results(code, secret);
       sessionStorage.setItem(`quiz-admin:${code}`, secret);
       $('#admin-login-secret').value = '';
       showMessage('#admin-login-message', '');
-      openAdmin({ code, secret });
+      openAdmin({ code, secret }, initialPayload);
     } catch (error) {
       showMessage('#admin-login-message', error.message);
     } finally {
@@ -422,6 +450,16 @@
     });
     $('#admin-login-form').addEventListener('submit', loginAdmin);
     $('#open-admin-button').addEventListener('click', () => openAdmin(state.admin));
+    document.addEventListener('visibilitychange', () => {
+      if (!state.admin) return;
+      if (document.visibilityState === 'hidden') {
+        stopAdminPolling();
+      } else {
+        refreshAdminResults().then(status => {
+          if (state.admin && status !== 'closed') scheduleAdminRefresh();
+        });
+      }
+    });
     $('#close-session-button').addEventListener('click', async () => {
       if (!state.admin) return;
       $('#close-session-button').disabled = true;
